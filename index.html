@@ -334,7 +334,7 @@ const MEALS = [
     note: both('Após o preparo dos ovos mexidos, acrescente o creme de ricota. Tempere com páprica defumada, cúrcuma, cebolinha e sal. O creme de ricota pode ser o do mercado ou a receita do plano.'),
     secs:[{ n:'', it:[
       { k:'cf_agua', n:'Água com limão ao acordar', m:both('30 ml de água + 20 gotas de extrato de própolis'), cnt:{q:20, u:'gotas de extrato de própolis'} },
-      { k:'cf_ovo', n:'Ovo de galinha inteiro, mexido', g:both(122), m:both('2 unidades grandes'), grp:'carnes', refG:25, refN:'Ovo de galinha', unit:[61,'ovos grandes'] },
+      { k:'cf_ovo', n:'Ovos', g:both(122), m:both('2 unidades grandes, mexidos'), grp:'carnes', refG:25, refN:'Ovo de galinha', unit:[61,'ovos grandes'] },
       { k:'cf_pao', n:'Pão francês', g:both(50), m:both('1 unidade'), grp:'paes', refG:12.5, refN:'Pão francês', unit:[50,'pães'] },
       { k:'cf_ricota', n:'Creme de ricota', g:both(25), m:both('1 colher de sopa rasa'), grp:'leite', refG:56, refN:'Creme de ricota (71 kcal/100 g, pela receita do plano)', recipe:true },
       { k:'cf_cafe', n:'Café com leite', g:both(165), m:both('1 copo pequeno cheio'), liquid:true },
@@ -479,7 +479,7 @@ const DEF_ACC = {E:'#0A84FF', T:'#FF375F'};
 const KEY = 'nossaDieta.v1';
 const DEF = () => ({ theme:'dark', cur:null, tab:'hoje', date:null,
   users:{E:{goal:null,water:null,height:179,cardio:150,trains:5}, T:{goal:null,water:null,height:162,cardio:150,trains:4}},
-  log:{}, weights:{E:[],T:[]}, week:{}, prefs:{E:{},T:{}}, train:{}, tswap:{E:{},T:{}}, meas:{E:[],T:[]}, lastBackup:null });
+  log:{}, weights:{E:[],T:[]}, week:{}, prefs:{E:{},T:{}}, shop:{freq:{},checked:{w:{},m:{}},custom:{w:[],m:[]}}, train:{}, tswap:{E:{},T:{}}, meas:{E:[],T:[]}, lastBackup:null });
 let S;
 try { S = JSON.parse(localStorage.getItem(KEY)||'{}'); } catch(e){ S = {}; }
 (function migrate(){
@@ -734,10 +734,11 @@ function vGuia(u){
 /* ---------- COZINHA (semana + a dois) ---------- */
 let cozView='semana';
 function vCozinha(){
-  let h = LT('Cozinha', 'Planejamento e preparo');
-  h += `<div class="tabs2"><button class="${cozView==='semana'?'on':''}" data-a="cview" data-t="semana">Semana</button><button class="${cozView==='dois'?'on':''}" data-a="cview" data-t="dois">Cozinhar a dois</button></div>`;
-  h += `<div class="grid2" style="margin-bottom:14px"><button class="btn" data-a="shopping">🛒 Compras</button><button class="btn sec" data-a="autoWeek">✨ Sugerir semana</button></div>`;
-  return h + (cozView==='semana' ? vSemana() : vDois());
+  let h = LT('Cozinha', 'Planejamento, preparo e compras');
+  h += `<div class="tabs2">${[['semana','Semana'],['dois','A dois'],['compras','Compras']].map(([k,l])=>`<button class="${cozView===k?'on':''}" data-a="cview" data-t="${k}">${l}</button>`).join('')}</div>`;
+  if(cozView==='semana') return h + `<button class="btn sec full" data-a="autoWeek" style="margin-bottom:14px">✨ Sugerir semana com as preferências</button>` + vSemana();
+  if(cozView==='dois') return h + vDois();
+  return h + vCompras();
 }
 function vSemana(){
   const today=pd(todayStr()).getDay(); const order=[1,2,3,4,5,6,0]; const cnt={};
@@ -977,38 +978,81 @@ function recipeSheet(){
       <div class="gh">Por 100 g</div><p class="small" style="margin:0">71 kcal · 6 g carboidratos · 10 g proteína · 1 g gordura · 1 g fibra · 58 mg sódio</p></div>
       <p class="muted xs">Rende cerca de 210 g, ~8 porções de 25 g (4 dias para os dois). Guarde na geladeira em pote fechado.</p>`});
 }
-let shopDays=7, shoppingText='';
-const DURAVEL=/Arroz|Farinha|Leite em pó|Leite de soja em pó|Whey|Aveia|Farelo|Granola|Cereal|Biscoito|Torrada|Pipoca|Cuscuz|Cevada|Atum|Sardinha|Semente|Canela|Café(?! com leite)|própolis|Feijão|Lentilha|Grão-de-bico|Soja|em lata|Macarrão|Azeite|Óleo|Castanha|Amendoim|Noz|Avelã|Azeitona|passa|seca|Damasco|Proteína de soja/i;
-function shoppingSheet(){
-  const acc={}, cnts={}, N=shopDays;
+/* ---------- LISTA DE COMPRAS (checklist) ---------- */
+let shopFreq='w', showDone=false, shoppingText='';
+const DURAVEL=/Arroz|Farinha|Leite em pó|Leite de soja em pó|Whey|Aveia|Farelo|Granola|Cereal|Biscoito|Torrada|Pipoca|Cuscuz|Cevada|Atum|Sardinha em|Semente|Canela|Café(?! com leite)|própolis|Feijão|Lentilha|Grão-de-bico|Soja|em lata|Macarrão|Azeite|Óleo|Castanha|Amendoim|Noz|Avelã|Azeitona|passa|seca|Damasco|Proteína de soja|Temperos/i;
+const AISLES=['Hortifrúti','Açougue e peixaria','Padaria','Frios, laticínios e ovos','Mercearia','Congelados','Farmácia e suplementos','Meus itens'];
+const AISLE_IC={'Hortifrúti':'🥬','Açougue e peixaria':'🥩','Padaria':'🥖','Frios, laticínios e ovos':'🧀','Mercearia':'🛒','Congelados':'🧊','Farmácia e suplementos':'💊','Meus itens':'📝'};
+const CNT_NAME={'gotas de extrato de própolis':['Extrato de própolis','gotas'],'colheres de sopa de semente de abóbora':['Semente de abóbora','colheres de sopa']};
+// conversão aproximada do peso pronto para o peso cru de compra
+const RAW=[[/^Arroz/,1/2.7],[/^Macarrão/,1/2.3],[/^(Feijão(?! tropeiro)|Lentilha|Grão-de-bico)/,1/2.5],[/frango|Frango|Bife|Carne(?!-seca)|Peixe|Almôndegas|Lombo|Pernil|Costela|Fígado|Hambúrguer|Sobrecoxa|Coxa/,1/0.72]];
+function aisleOf(name,grp){
+  if(/^Ovo|Omelete|Ovos/.test(name)) return 'Frios, laticínios e ovos';
+  if(/Whey|própolis/i.test(name)) return 'Farmácia e suplementos';
+  if(/Lasanha|Nhoque|Ravióli|Açaí/.test(name)) return 'Congelados';
+  if(/Atum|Sardinha em|Uva-passa|Banana-passa|Ameixa seca|Damasco|Água de coco|Semente|Canela|Temperos|Leite em pó|Leite de soja em pó/.test(name)) return 'Mercearia';
+  if(/Kani|Tender|Linguiça/.test(name)) return 'Frios, laticínios e ovos';
+  if(/Requeijão|Manteiga|Nata|Maionese|Café com leite|Creme de ricota/.test(name)) return 'Frios, laticínios e ovos';
+  if(grp==='frutas'||grp==='hortA'||grp==='hortAB'||/Folhas|Batata|Mandioca|Inhame|Cará|Mandioquinha|Milho verde refogado|Espinafre|Salada|Abacaxi|Mamão|Morango|Laranja/.test(name)) return 'Hortifrúti';
+  if(grp==='carnes') return 'Açougue e peixaria';
+  if(grp==='paes' && /^Pão|Broa|Croissant|Bisnaguinha/.test(name)) return 'Padaria';
+  if(grp==='leite') return 'Frios, laticínios e ovos';
+  if(/Filé de frango/.test(name)) return 'Açougue e peixaria';
+  if(/Pão francês/.test(name)) return 'Padaria';
+  if(/Iogurte/.test(name)) return 'Frios, laticínios e ovos';
+  return 'Mercearia';
+}
+function shopAll(){
+  S.shop=S.shop||{}; S.shop.freq=S.shop.freq||{}; S.shop.checked=S.shop.checked||{w:{},m:{}}; S.shop.custom=S.shop.custom||{w:[],m:[]};
+  return S.shop;
+}
+function defFreq(r){ return (DURAVEL.test(r.name) || r.aisle==='Açougue e peixaria') ? 'm' : 'w'; }
+function freqOf(r){ return shopAll().freq[r.key] || defFreq(r); }
+function shopRows(freq){
+  const N=freq==='m'?30:7, acc={};
+  const add=(key,meta,g,c)=>{ const r=acc[key]=acc[key]||Object.assign({key,g:0,c:0},meta); r.g+=g||0; r.c+=c||0; };
   for(let i=0;i<N;i++){ const d=addDays(todayStr(),i);
     for(const u of ['E','T']) for(const it of itemsOf(u)){
-      if(it.cnt){ cnts[it.cnt.u]=(cnts[it.cnt.u]||0)+it.cnt.q; continue; }
+      if(it.cnt){ const [nm,un]=CNT_NAME[it.cnt.u]||[it.cnt.u,'']; add(nm,{name:nm,count:un},0,it.cnt.q); continue; }
       if(!it.g||it.g[u]==null) continue;
-      const sub=it.grp?subOf(it.k,u,d):null; let name=it.n, g=it.g[u], cat=it.grp?(it.grp.startsWith('hort')?'Hortaliças':GROUPS[it.grp].n):'Outros';
+      const sub=it.grp?subOf(it.k,u,d):null; let name=it.n, g=it.g[u];
       if(sub){ const o=findOpt(it,g,sub); if(o){ name=o.n; g=o.g; } }
       if(it.k==='al_salada'&&!sub) name='Folhas e verduras para salada';
-      const key=cat+'|'+name; acc[key]=acc[key]||{cat,name,g:0,unit:(!sub&&it.unit)||null,liquid:it.liquid&&!sub}; acc[key].g+=g; } }
-  const monthly=N>7;
-  let body=`<p class="muted small" style="margin-top:0">Total para os <b>próximos ${N} dias</b> (os dois), com as trocas planejadas. Pesos de arroz, frango, mandioca etc. são do alimento <b>pronto</b>; compre com folga.</p>`;
-  let txt=`🛒 Lista de compras · ${monthly?'mês (30 dias)':'semana (7 dias)'} · Edésio + Tayna\n`;
-  const rowsAll=Object.values(acc);
-  const sections=monthly?[['📦 Compra do mês (duráveis)',rowsAll.filter(r=>DURAVEL.test(r.name)),false],['🥬 Frescos: total do mês, compre por semana',rowsAll.filter(r=>!DURAVEL.test(r.name)),true]]:[['',rowsAll,false]];
-  for(const [st,rows,perWeek] of sections){ if(!rows.length) continue;
-    if(st){ body+=`<div class="h3" style="font-size:17px;margin:18px 4px 2px">${st}</div>`; txt+=`\n${st.toUpperCase()}\n`; }
-    const cats={}; rows.forEach(r=>{ (cats[r.cat]=cats[r.cat]||[]).push(r); });
-    for(const [c,rs] of Object.entries(cats)){ body+=`<div class="gh">${esc(c)}</div><div class="card" style="padding:2px 16px">`; txt+=`\n*${c}*\n`;
-      rs.sort((a,b)=>a.name.localeCompare(b.name,'pt'));
-      for(const r of rs){ const q=fmtG(Math.round(r.g),r.name,r.liquid); const un=r.unit?` (≈ ${Math.ceil(r.g/r.unit[0])} ${r.unit[1]})`:'';
-        const wk=perWeek?`≈ ${fmtG(Math.round(r.g*7/N/5)*5||Math.round(r.g*7/N),r.name,r.liquid)}/semana`:'';
-        body+=`<div class="list-row"><span>${esc(r.name)}</span><span style="text-align:right"><b class="small">${q}${esc(un)}</b>${wk?`<div class="muted xs">${esc(wk)}</div>`:''}</span></div>`; txt+=`• ${r.name}: ${q}${un}${wk?' · '+wk:''}\n`; }
-      body+=`</div>`; } }
-  body+=`<div class="gh">Itens contados</div><div class="card" style="padding:2px 16px">`; txt+='\n*Itens contados*\n';
-  for(const [u,q] of Object.entries(cnts)){ body+=`<div class="list-row"><span>${esc(u[0].toUpperCase()+u.slice(1))}</span><b class="small">${q}</b></div>`; txt+=`• ${u}: ${q}\n`; }
-  body+=`<div class="list-row"><span>Temperos: páprica defumada, cúrcuma, cebolinha, sal</span><b class="small">a gosto</b></div></div>`;
-  txt+='• Temperos (páprica defumada, cúrcuma, cebolinha, sal): a gosto\n';
-  body+=`<button class="btn full" data-a="copyList">Copiar / compartilhar lista</button>`; shoppingText=txt;
-  openSheet({head:`<div class="between"><h2>Lista de compras</h2>${closeBtn}</div><div class="tabs2" style="margin:12px 0 0"><button class="${N===7?'on':''}" data-a="shopP" data-n="7">Semanal</button><button class="${N===30?'on':''}" data-a="shopP" data-n="30">Mensal</button></div>`, body});
+      add(name,{name,grp:it.grp||null,unit:(!sub&&it.unit)||null,liquid:it.liquid&&!sub},g);
+    } }
+  add('Temperos',{name:'Temperos (páprica defumada, cúrcuma, cebolinha, sal)',count:'a gosto'},0,0);
+  const rows=Object.values(acc).map(r=>{ r.aisle=aisleOf(r.name,r.grp);
+    if(r.count){ r.qty = r.count==='a gosto' ? 'a gosto' : r.c+' '+r.count; r.sub=''; }
+    else { const rw=RAW.find(([re])=>re.test(r.name));
+      if(rw){ r.qty='≈ '+fmtG(Math.round(r.g*rw[1]/10)*10,r.name)+' cru'; r.sub=fmtG(Math.round(r.g),r.name)+' pronto'; r.name=r.name.replace(/\s(cozid[oa]|grelhad[oa])\b/,''); }
+      else if(r.unit){ r.qty=`${Math.ceil(r.g/r.unit[0])} ${r.unit[1]}`; r.sub='≈ '+fmtG(Math.round(r.g),r.name,r.liquid); }
+      else { r.qty=fmtG(Math.round(r.g),r.name,r.liquid); r.sub=''; } }
+    return r; }).filter(r=>freqOf(r)===freq);
+  for(const c of shopAll().custom[freq]) rows.push({key:'c:'+c.id, name:c.n, qty:'', sub:'', aisle:'Meus itens', custom:true});
+  return rows;
+}
+function vCompras(){
+  const f=shopFreq, sh=shopAll(), rows=shopRows(f), chk=sh.checked[f]||{};
+  const pend=rows.filter(r=>!chk[r.key]), done=rows.filter(r=>chk[r.key]);
+  const pct=rows.length?Math.round(done.length/rows.length*100):0;
+  let h=`<div class="tabs2"><button class="${f==='w'?'on':''}" data-a="shopF" data-f="w">🗓️ Semanal · 7 dias</button><button class="${f==='m'?'on':''}" data-a="shopF" data-f="m">📦 Mensal · 30 dias</button></div>`;
+  h+=`<div class="card"><div class="between"><div><div class="h3">${pend.length?pend.length+' ite'+(pend.length>1?'ns':'m')+' para comprar':'Tudo comprado ✓'}</div>
+      <div class="muted small">${done.length} de ${rows.length} marcados${f==='w'?' · frescos da semana':' · despensa e congelados do mês'}</div></div>${ring(pct,'var(--green)',64)}</div>
+    <div class="grid2" style="margin-top:14px"><button class="btn sec sm" data-a="shopReset">↺ Nova compra</button><button class="btn sm" data-a="copyList">Compartilhar</button></div></div>`;
+  h+=`<div class="banner"><div>💡</div><div>Antes de sair, <b>marque o que já tem em casa</b>. No mercado, marque o que for pondo no carrinho. Só o que falta fica na lista. Use <b>→ mês</b> / <b>→ semana</b> para mudar um item de lista.</div></div>`;
+  h+=`<div class="card" style="padding:10px 10px 10px 16px"><div class="row"><input type="text" id="shopAdd" placeholder="Adicionar item (ex.: papel-toalha)" style="background:transparent;padding-left:0;min-height:40px"><button class="circ" data-a="shopAdd" aria-label="Adicionar" style="background:var(--acc);color:var(--acc-ink)">+</button></div></div>`;
+  const row=r=>{ const on=!!chk[r.key];
+    return `<div class="item ${on?'done':''}"><button class="chk ${on?'on':''}" data-a="shopChk" data-k="${esc(r.key)}" aria-label="Marcar">${CHECK}</button>
+      <div class="it-main"><div class="it-n">${esc(r.name)}</div>${r.qty||r.sub?`<div class="it-q">${esc(r.qty)}${r.sub?' · '+esc(r.sub):''}</div>`:''}</div>
+      ${r.custom?`<button class="circ" style="width:30px;height:30px;font-size:13px;color:var(--muted)" data-a="shopDel" data-k="${esc(r.key)}" aria-label="Remover">✕</button>`
+        :`<button class="pill" data-a="shopMove" data-k="${esc(r.key)}" data-to="${f==='w'?'m':'w'}">${f==='w'?'→ mês':'→ semana'}</button>`}</div>`; };
+  for(const a of AISLES){ const rs=pend.filter(r=>r.aisle===a).sort((x,y)=>x.name.localeCompare(y.name,'pt')); if(!rs.length) continue;
+    h+=`<div class="card"><div class="between" style="margin-bottom:2px"><div class="b">${AISLE_IC[a]} ${a}</div><span class="muted xs">${rs.length}</span></div>${rs.map(row).join('')}</div>`; }
+  if(!pend.length && rows.length) h+=`<div class="card" style="text-align:center"><div style="font-size:44px">🎉</div><div class="h3">Lista completa</div><div class="muted small">Toque em “Nova compra” para começar a próxima.</div></div>`;
+  if(done.length) h+=`<div class="card"><button class="between" style="width:100%" data-a="shopShowDone"><span class="b">✓ No carrinho / já tenho (${done.length})</span><span class="muted">${showDone?'ocultar':'mostrar'}</span></button>${showDone?done.sort((x,y)=>x.name.localeCompare(y.name,'pt')).map(row).join(''):''}</div>`;
+  h+=`<p class="muted xs" style="margin:4px 8px 0">Quantidades para os dois${f==='w'?' nos próximos 7 dias':' nos próximos 30 dias'}, já com as trocas planejadas. Arroz, carnes e leguminosas aparecem convertidos para o peso <b>cru</b> (aproximado); compre com uma pequena folga.</p>`;
+  shoppingText=`🛒 Compras ${f==='w'?'da semana':'do mês'} · o que falta\n`+AISLES.map(a=>{ const rs=pend.filter(r=>r.aisle===a); return rs.length?`\n${AISLE_IC[a]} *${a}*\n`+rs.map(r=>`• ${r.name}${r.qty?': '+r.qty:''}`).join('\n'):''; }).filter(Boolean).join('\n');
+  return h;
 }
 function copyDaySheet(dw){
   const order=[1,2,3,4,5,6,0].filter(x=>x!==dw);
@@ -1044,8 +1088,14 @@ const A = {
   pickSub(el){ pickSub(el.dataset.n); },
   closeSheet(){ closeSheet(); },
   recipe(){ recipeSheet(); },
-  shopping(){ shoppingSheet(); },
-  shopP(el){ shopDays=Number(el.dataset.n); shoppingSheet(); },
+  shopping(){ S.tab='cozinha'; cozView='compras'; render(); window.scrollTo(0,0); },
+  shopF(el){ shopFreq=el.dataset.f; showDone=false; render(); },
+  shopChk(el){ const c=shopAll().checked; c[shopFreq]=c[shopFreq]||{}; const k=el.dataset.k; if(c[shopFreq][k]) delete c[shopFreq][k]; else c[shopFreq][k]=true; save(); keepScroll(render); },
+  shopMove(el){ const k=el.dataset.k, to=el.dataset.to; shopAll().freq[k]=to; delete S.shop.checked[shopFreq][k]; save(); keepScroll(render); toast(to==='m'?'Movido para a lista mensal':'Movido para a lista semanal'); },
+  shopAdd(){ const i=$('shopAdd'); const n=(i.value||'').trim(); if(!n){ i.focus(); return; } shopAll().custom[shopFreq].push({id:Date.now().toString(36), n}); save(); keepScroll(render); setTimeout(()=>$('shopAdd')&&$('shopAdd').focus(),0); },
+  shopDel(el){ const id=el.dataset.k.slice(2); const sh=shopAll(); sh.custom[shopFreq]=sh.custom[shopFreq].filter(c=>c.id!==id); delete sh.checked[shopFreq][el.dataset.k]; save(); keepScroll(render); },
+  shopReset(){ if(!confirm('Começar uma nova compra '+(shopFreq==='w'?'semanal':'mensal')+'? Todos os itens voltam a ficar desmarcados.')) return; shopAll().checked[shopFreq]={}; showDone=false; save(); keepScroll(render); toast('Lista zerada para a nova compra'); },
+  shopShowDone(){ showDone=!showDone; keepScroll(render); },
   async copyList(){ try{ if(navigator.share){ await navigator.share({text:shoppingText}); return; } }catch(e){ if(e.name==='AbortError') return; }
     try{ await navigator.clipboard.writeText(shoppingText); toast('Lista copiada'); }catch(e){ toast('Não foi possível copiar'); } },
   autoWeek(){
@@ -1119,7 +1169,7 @@ document.addEventListener('change', e=>{
   if(t.id==='impFile'&&t.files[0]){ const r=new FileReader(); r.onload=()=>{ try{ const j=JSON.parse(r.result); const d=j.data||j; if(!d.log||!d.weights) throw 0;
       if(!confirm('Substituir os dados deste aparelho pelos do backup?')) return; localStorage.setItem(KEY, JSON.stringify(d)); location.reload(); }catch(err){ toast('Arquivo de backup inválido'); } }; r.readAsText(t.files[0]); t.value=''; }
 });
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeSheet(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeSheet(); if(e.key==='Enter' && e.target.id==='shopAdd') A.shopAdd(); });
 let lastToday=todayStr();
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && todayStr()!==lastToday){ if(S.date===lastToday) S.date=todayStr(); lastToday=todayStr(); render(); } });
 
