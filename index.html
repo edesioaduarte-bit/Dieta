@@ -232,7 +232,8 @@ details.day[open] summary .chev{transform:rotate(90deg)}
 /* layout v4 */
 .thumb{width:44px;height:44px;border-radius:50%;background:var(--fill2);display:grid;place-items:center;font-size:23px;flex:0 0 auto;line-height:1;position:relative}
 .thumb.sw::after{content:"⇄";position:absolute;right:-3px;bottom:-3px;width:18px;height:18px;border-radius:50%;background:var(--acc);color:var(--acc-ink);font-size:10px;display:grid;place-items:center;box-shadow:0 0 0 2px var(--solid)}
-.item.done .thumb{opacity:.45}
+.item.done .thumb,.item.skipped .thumb{opacity:.45}
+.item.skipped .it-n{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--muted2)}
 .dash{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center}
 .kcal{font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1.1;margin:2px 0}
 .kcal small,.mac .v small{font-size:13px;font-weight:600;color:var(--muted)}
@@ -569,7 +570,14 @@ function options(it, g){
 const WHEY_NAME='Whey protein concentrado (New Nutrition)';
 function wheyCfg(){ const w=S.whey||{}; return {dose:Number(w.dose)||30, prot:Number(w.prot)||24}; }
 function findOpt(it,g,name){ for(const grp of options(it,g)) for(const o of grp.list) if(o.n===name) return o; return null; }
-function eff(it,u,d){
+function skipsOf(d,u){ return getDay(d,u).skip||{}; }
+function kcalPerG(it,u,d){ const g0=baseEff(it,u,d).g; return g0? baseMac(it,u,d)[0]/g0 : 0; }
+function bonusG(it,u,d){ const sk=skipsOf(d,u); let b=0; const kpg=kcalPerG(it,u,d); if(!(kpg>0)) return 0;
+  for(const [k,to] of Object.entries(sk)){ if(to!==it.k||k===it.k) continue; const s=ITEMS[k]; if(!s||!has(s,u)) continue; b+=baseMac(s,u,d)[0]/kpg; } return b; }
+function eff(it,u,d){ const e=baseEff(it,u,d); const sk=skipsOf(d,u);
+  if(it.k in sk){ e.skip=true; e.to=sk[it.k]; return e; }
+  const b=bonusG(it,u,d); if(b>0 && e.g!=null){ e.bonus=rnd(b); e.g0=e.g; e.g=e.g+e.bonus; } return e; }
+function baseEff(it,u,d){
   const g = it.g ? it.g[u] : null;
   const sub = it.grp ? subOf(it.k,u,d) : null;
   if(sub){ const o=findOpt(it,g,sub); if(o) return {n:o.n, g:o.g, s:o.s, sub:true, orig:it.n, whey:!!o.whey}; }
@@ -578,7 +586,7 @@ function eff(it,u,d){
 function bumpPref(u,k,name){ if(!name) return; const P=S.prefs[u]=S.prefs[u]||{}; P[k]=P[k]||{}; P[k][name]=(P[k][name]||0)+1; }
 function favs(users,k,n=3){ const c={}; for(const u of users){ const P=((S.prefs[u]||{})[k])||{}; for(const [f,v] of Object.entries(P)) c[f]=(c[f]||0)+v; } return Object.entries(c).sort((a,b)=>b[1]-a[1]).slice(0,n); }
 function anyPrefs(){ return ['E','T'].some(u=>Object.keys(S.prefs[u]||{}).length); }
-function adherence(d,u){ const its=itemsOf(u); const L=getDay(d,u); const c=its.filter(it=>L.checks[it.k]).length; return {c, t:its.length, p:its.length?Math.round(c/its.length*100):0}; }
+function adherence(d,u){ const sk=skipsOf(d,u); const its=itemsOf(u).filter(it=>!(it.k in sk)); const L=getDay(d,u); const c=its.filter(it=>L.checks[it.k]).length; return {c, t:its.length, p:its.length?Math.round(c/its.length*100):0}; }
 function hasLog(d,u){ const L=S.log[d]&&S.log[d][u]; return !!(L && (Object.values(L.checks||{}).some(Boolean) || L.water>0 || L.note)); }
 function sortedW(u){ return [...S.weights[u]].sort((a,b)=>a.d<b.d?-1:1); }
 function lastWeight(u){ const w=sortedW(u); return w.length? w[w.length-1].kg : null; }
@@ -678,7 +686,9 @@ const NUT = { cf_ovo:[146,13.3,0.6,9.5], cf_pao:[300,8,58.6,3.1], cf_ricota:[71,
 const NUT_FIX = { cf_semente:[112,6,2.2,9.8], cf_agua:[0,0,0,0] }; // semente: 2 colheres de sopa ≈ 20 g
 // troca: porções do grupo × perfil médio da porção [kcal, %prot, %carb, %gord da energia]
 const GP = { paes:[35,.12,.80,.08], carbo:[35,.10,.85,.05], leg:[35,.28,.65,.07], oleo:[14,0,0,1], leite:[40,.30,.35,.35], carnes:[60,.60,0,.40], frutas:[15,.04,.95,.01], oleag:[12.5,.12,.13,.75] };
-function macroOf(it,u,d){
+function macroOf(it,u,d){ if(it.k in skipsOf(d,u)) return [0,0,0,0]; const m=baseMac(it,u,d); const b=bonusG(it,u,d);
+  if(b>0){ const g0=baseEff(it,u,d).g; if(g0) return m.map(v=>v*(1+b/g0)); } return m; }
+function baseMac(it,u,d){
   if(NUT_FIX[it.k]) return NUT_FIX[it.k];
   const g=it.g&&it.g[u]; if(g==null) return [0,0,0,0];
   const sub=it.grp?subOf(it.k,u,d):null;
@@ -741,13 +751,17 @@ function vHoje(){
   for(const s of ml.secs){ const si=s.it.filter(it=>has(it,u)); if(!si.length) continue;
     if(s.n) h += `<div class="sec-t">${s.n}</div>`;
     for(const it of si){ const e=eff(it,u,d), on=!!L.checks[it.k];
-      const q=[e.g!=null?fmtG(e.g,e.n,e.liquid):'', e.m||''].filter(Boolean).join(' · ');
-      h += `<div class="item ${on?'done':''}"><button class="thumb ${it.grp?'sw':''}" ${it.grp?`data-a="openSub" data-k="${it.k}"`:(it.recipe?'data-a="recipe"':'')} aria-label="${it.grp?'Trocar':'Item'}">${foodIc(e.n)}</button>
-        <div class="it-main" ${it.grp?`data-a="openSub" data-k="${it.k}"`:''}><div class="it-n">${esc(e.n)}${e.s?' <span style="color:var(--warn)">⚠</span>':''}</div>
-          <div class="it-q">${esc(q)}${e.whey?' · ≈ '+num(e.g/wheyCfg().dose,1)+' dose(s)':''}${e.sub?` · <span style="color:var(--green)">↻ troca</span>`:''}${it.recipe&&!e.sub?' · <span style="color:var(--acc)" data-a="recipe">receita</span>':''}</div></div>
+      if(e.skip){ const to=e.to&&ITEMS[e.to]; const tb=to? eff(to,u,d).bonus : 0;
+        h += `<div class="item skipped"><button class="thumb" data-a="itemSheet" data-k="${it.k}">${foodIc(e.n)}</button>
+          <div class="it-main" data-a="itemSheet" data-k="${it.k}"><div class="it-n">${esc(e.n)}</div><div class="it-q"><span style="color:var(--warn)">não vou comer</span>${to&&tb?` · compensado em ${esc(eff(to,u,d).n.toLowerCase())} (+${num(tb)} g)`:' · sem compensação'}</div></div>
+          <button class="pill" data-a="unskip" data-k="${it.k}">desfazer</button></div>`; continue; }
+      const q=[e.g!=null?fmtG(e.g,e.n,e.liquid):'', e.bonus?'':(e.m||'')].filter(Boolean).join(' · ');
+      h += `<div class="item ${on?'done':''}"><button class="thumb ${it.grp?'sw':''}" data-a="itemSheet" data-k="${it.k}" aria-label="Opções">${foodIc(e.n)}</button>
+        <div class="it-main" data-a="itemSheet" data-k="${it.k}"><div class="it-n">${esc(e.n)}${e.s?' <span style="color:var(--warn)">⚠</span>':''}</div>
+          <div class="it-q">${esc(q)}${e.bonus?` <span style="color:var(--warn)">(${fmtG(e.g0,e.n,e.liquid)} + ${num(e.bonus)} g compensação)</span>`:''}${e.whey?' · ≈ '+num(e.g/wheyCfg().dose,1)+' dose(s)':''}${e.sub?` · <span style="color:var(--green)">↻ troca</span>`:''}${it.recipe&&!e.sub?' · <span style="color:var(--acc)" data-a="recipe">receita</span>':''}</div></div>
         ${isF?'':`<button class="chk ${on?'on':''}" data-a="chk" data-k="${it.k}" aria-label="Marcar">${CHECK}</button>`}</div>`; } }
   if(ml.note && ml.note[u]) h += `<details class="note"><summary>📝 Orientação da nutricionista</summary><div style="margin-top:6px">${esc(ml.note[u])}</div></details>`;
-  h += `<div class="muted xs" style="margin-top:10px;text-align:center">Toque no alimento para ver as trocas</div></div>`;
+  h += `<div class="muted xs" style="margin-top:10px;text-align:center">Toque no alimento para trocar ou pular</div></div>`;
   if(!isF) h += `<details class="card daynote"><summary class="between"><span class="b">📝 Anotações do dia</span><span class="muted xs">${L.note?'1 nota':'adicionar'}</span></summary><textarea id="dayNote" style="margin-top:10px" placeholder="Ex.: fome à tarde, comi fora, dormi mal...">${esc(L.note||'')}</textarea></details>`;
   return h;
 }
@@ -879,7 +893,7 @@ function vDois(){
   for(const ml of MEALS){
     h += `<div class="card"><div class="between" style="margin-bottom:4px"><h3 class="h3">${ml.n}</h3><span class="muted xs">${ml.t.E===ml.t.T?ml.t.E:'E '+ml.t.E+' · T '+ml.t.T}</span></div>`;
     for(const it of ml.secs.flatMap(s=>s.it)){
-      const eE=has(it,'E')?eff(it,'E',d):null, eT=has(it,'T')?eff(it,'T',d):null;
+      let eE=has(it,'E')?eff(it,'E',d):null, eT=has(it,'T')?eff(it,'T',d):null; if(eE&&eE.skip) eE=null; if(eT&&eT.skip) eT=null;
       if(eE && eT && eE.n===eT.n){ const tot=(eE.g!=null&&eT.g!=null)?eE.g+eT.g:null;
         h += `<div class="cook-row"><div class="between"><span class="b row" style="gap:10px"><span class="thumb" style="width:36px;height:36px;font-size:19px">${foodIc(eE.n)}</span>${esc(eE.n)}${eE.s?' ⚠':''}</span><span class="b" style="color:var(--green)">${tot!=null?'Total '+fmtG(tot,eE.n,eE.liquid):''}</span></div>
           <div class="split">${tot!=null?`<span class="pill E">Edésio ${fmtG(eE.g,eE.n,eE.liquid)}</span><span class="pill T">Tayna ${fmtG(eT.g,eT.n,eT.liquid)}</span>`:`<span class="muted small">${esc(eE.m||'')} · cada um</span>`}
@@ -1049,6 +1063,7 @@ function openSub(k,dw){
   const it=ITEMS[k]; const week=dw!=null&&dw!=='';
   subCtx={k, week, dw:week?Number(dw):null, both:has(it,OTHER[S.cur]), q:''}; const u=S.cur; const g=week?null:it.g[u];
   const head=`<div class="between"><div><h2>${esc(it.n)}</h2><div class="muted small">${week?'Troca para '+DOW[subCtx.dw].toLowerCase()+' · vale para os dois':'Plano: '+fmtG(g,it.n,it.liquid)+(it.m&&it.m[u]?' · '+esc(it.m[u]):'')}</div></div>${closeBtn}</div>
+    ${!week?`<button class="btn sec full sm" style="margin-top:12px" data-a="skipSheet" data-k="${k}">🚫 Não vou comer hoje · compensar em outro item</button>`:''}
     ${!week&&subCtx.both?`<label class="toggle" style="margin:12px 0 0"><input type="checkbox" id="subBoth"> Aplicar também para ${USERS[OTHER[u]].name} neste dia</label>`:''}
     ${it.grp==='hortA'||it.grp==='hortAB'?'':`<input type="search" id="subQ" placeholder="Buscar alimento..." style="margin-top:10px">`}`;
   openSheet({head, body:subList()});
@@ -1079,6 +1094,27 @@ function pickSub(name){
     for(const x of both?[u,OTHER[u]]:[u]){ bumpPref(x,k,name); const L=dayW(S.date,x); const wk=(S.week[pd(S.date).getDay()]||{})[k]||null;
       if(name===wk) delete L.subs[k]; else L.subs[k]=name||null; if(L.subs[k]===null&&!wk) delete L.subs[k]; } }
   save(); closeSheet(); keepScroll(render); toast(name?'Troca aplicada: '+name:'Voltou ao original');
+}
+function skipSheet(k){
+  const u=S.cur, d=S.date, it=ITEMS[k]; const kc=baseMac(it,u,d)[0]; const sk=skipsOf(d,u); const meal=it.meal;
+  const cand=itemsOf(u).filter(t=>t.k!==k && !(t.k in sk) && t.g && t.g[u]!=null && kcalPerG(t,u,d)>0.3 && t.k!=='al_canela');
+  const opt=t=>{ const e=eff(t,u,d); const add=rnd(kc/kcalPerG(t,u,d)); return `<button class="opt" data-a="doSkip" data-k="${k}" data-to="${t.k}"><div class="row" style="gap:12px"><span class="thumb" style="width:38px;height:38px;font-size:20px">${foodIc(e.n)}</span><div><div class="on">${esc(e.n)}</div><div class="muted xs">${fmtG(e.g,e.n,e.liquid)} → ${fmtG(e.g+add,e.n,e.liquid)}</div></div></div><span class="og">+${num(add)} g</span></button>`; };
+  const same=cand.filter(t=>t.meal===meal), other=cand.filter(t=>t.meal!==meal);
+  const tip = (it.grp==='hortA'||it.grp==='hortAB') ? `<div class="tip" style="margin:0 0 6px">💡 Verduras e legumes têm poucas calorias, mas dão fibras e saciedade. Se tiver outro legume ou verdura em casa, a opção <b>Trocar</b> é melhor que compensar no carboidrato.</div>` : '';
+  openSheet({head:`<div class="between"><div><h2>Não vou comer</h2><div class="muted small">${esc(eff(it,u,d).n)} · ≈ ${num(Math.round(kc),0)} kcal</div></div>${closeBtn}</div>`,
+    body: tip + `<button class="opt" data-a="doSkip" data-k="${k}" data-to=""><div class="row" style="gap:12px"><span class="thumb" style="width:38px;height:38px;font-size:20px">⛔</span><div><div class="on">Não compensar</div><div class="muted xs">Só retirar do dia (−${num(Math.round(kc),0)} kcal)</div></div></div></button>`
+      + (same.length?`<div class="gh">Compensar na mesma refeição · mesmas calorias</div>`+same.map(opt).join(''):'')
+      + (other.length?`<div class="gh">Em outra refeição</div>`+other.map(opt).join(''):'')
+      + `<p class="muted xs">Cálculo pelas mesmas calorias do item retirado. Vale só para ${USERS[u].name} neste dia.</p>`});
+}
+function itemSheet(k){
+  const it=ITEMS[k], u=S.cur, d=S.date;
+  if(it.grp) return openSub(k);
+  if(k in skipsOf(d,u)) return skipSheet(k);
+  const e=eff(it,u,d);
+  openSheet({head:`<div class="between"><div><h2>${esc(e.n)}</h2><div class="muted small">${e.g!=null?fmtG(e.g,e.n,e.liquid):''}${e.m?' · '+esc(e.m):''}</div></div>${closeBtn}</div>`,
+    body:`<p class="muted small" style="margin-top:0">Este item não consta na lista de substituição, então não tem troca calculada.</p>
+      ${baseMac(it,u,d)[0]>1?`<button class="btn sec full" data-a="skipSheet" data-k="${k}">🚫 Não vou comer hoje · compensar em outro item</button>`:`<button class="btn sec full" data-a="doSkip" data-k="${k}" data-to="">🚫 Não vou fazer hoje</button>`}`});
 }
 function exSwapSheet(w,i){
   const u=S.cur, slot=FICHAS[u].w[w].ex[i], cur=exAt(u,w,i), grp=EX[slot.e][2];
@@ -1205,6 +1241,12 @@ const A = {
   closeSheet(){ closeSheet(); },
   recipe(){ recipeSheet(); },
   totals(){ totalsSheet(); },
+  itemSheet(el){ itemSheet(el.dataset.k); },
+  skipSheet(el){ skipSheet(el.dataset.k); },
+  doSkip(el){ const L=dayW(S.date,S.cur); L.skip=L.skip||{}; L.skip[el.dataset.k]=el.dataset.to||''; delete L.checks[el.dataset.k];
+    for(const [k,to] of Object.entries(L.skip)) if(to===el.dataset.k) L.skip[k]=''; // não compensar em item retirado
+    save(); closeSheet(); keepScroll(render); toast(el.dataset.to?'Compensado em '+ITEMS[el.dataset.to].n.toLowerCase():'Item retirado do dia'); },
+  unskip(el){ const L=dayW(S.date,S.cur); if(L.skip) delete L.skip[el.dataset.k]; save(); keepScroll(render); toast('Item de volta ao plano'); },
   cozDia(){ S.tab='cozinha'; cozView='dois'; save(); render(); window.scrollTo(0,0); },
   meal(el){ mealSel=el.dataset.m; keepScroll(render); },
   exOpen(el){ const i=Number(el.dataset.i); const cur=document.querySelector('.exwrap.open'); const openNow=cur?[...document.querySelectorAll('.exwrap')].indexOf(cur):-1; exOpen = openNow===i ? -1 : i; keepScroll(render); },
