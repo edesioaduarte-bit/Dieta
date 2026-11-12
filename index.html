@@ -559,13 +559,20 @@ function options(it, g){
   if(it.grp==='hortA') return [{gh:'Hortaliças tipo A (≈5 kcal/porção)', list:HORT_A.map(n=>({n, g, ref:'mesma quantidade'}))}];
   if(it.grp==='hortAB') return [{gh:'Hortaliças tipo A (≈5 kcal/porção)', list:HORT_A.map(n=>({n, g, ref:'mesma quantidade'}))},{gh:'Hortaliças tipo B (≈10 kcal/porção)', list:HORT_B.map(([n])=>({n, g, ref:'mesma quantidade'}))}];
   const G=GROUPS[it.grp]; const p=g/it.refG;
-  return [{gh:G.n+' · '+G.k, list:G.f.map(f=>({n:f.n, s:f.s, g:rnd(p*f.g), ref:'1 porção = '+f.m+' ('+num(f.g)+' g)'}))}];
+  const out=[{gh:G.n+' · '+G.k, list:G.f.map(f=>({n:f.n, s:f.s, g:rnd(p*f.g), ref:'1 porção = '+f.m+' ('+num(f.g)+' g)'}))}];
+  if((it.grp==='carnes'||it.grp==='leite') && typeof NUT!=='undefined' && NUT[it.k] && g){
+    const W=wheyCfg(), prot=NUT[it.k][1]*g/100, wg=Math.round(prot/(W.prot/W.dose)), doses=wg/W.dose;
+    out.unshift({gh:'🥤 Whey · fora da lista, mesma proteína', list:[{n:WHEY_NAME, g:wg, whey:true, ref:`≈ ${num(doses,1)} dose${doses>=1.5?'s':''} de ${num(W.dose)} g · ${num(Math.round(prot),0)} g de proteína`}]});
+  }
+  return out;
 }
+const WHEY_NAME='Whey protein concentrado (New Nutrition)';
+function wheyCfg(){ const w=S.whey||{}; return {dose:Number(w.dose)||30, prot:Number(w.prot)||24}; }
 function findOpt(it,g,name){ for(const grp of options(it,g)) for(const o of grp.list) if(o.n===name) return o; return null; }
 function eff(it,u,d){
   const g = it.g ? it.g[u] : null;
   const sub = it.grp ? subOf(it.k,u,d) : null;
-  if(sub){ const o=findOpt(it,g,sub); if(o) return {n:o.n, g:o.g, s:o.s, sub:true, orig:it.n}; }
+  if(sub){ const o=findOpt(it,g,sub); if(o) return {n:o.n, g:o.g, s:o.s, sub:true, orig:it.n, whey:!!o.whey}; }
   return {n:it.n, g, m:it.m?it.m[u]:null, sub:false, liquid:it.liquid};
 }
 function bumpPref(u,k,name){ if(!name) return; const P=S.prefs[u]=S.prefs[u]||{}; P[k]=P[k]||{}; P[k][name]=(P[k][name]||0)+1; }
@@ -647,11 +654,13 @@ function vWelcome(){
     <div class="big"><button style="background:var(--E)" data-a="user" data-u="E">Edésio</button><button style="background:var(--T)" data-a="user" data-u="T">Tayna</button></div></div>`;
 }
 
+const MAXF=30;
+function dayLabel(d){ const t=todayStr(); return d===t?'Hoje':d===addDays(t,1)?'Amanhã':d===addDays(t,-1)?'Ontem':null; }
 function dateNav(){
-  const isT=S.date===todayStr();
+  const isT=S.date===todayStr(); const atMax=S.date>=addDays(todayStr(),MAXF);
   return `<div class="row" style="gap:8px">${isT?'':'<button class="btn sec sm" data-a="today">Hoje</button>'}
     <button class="circ" data-a="day" data-n="-1" aria-label="Dia anterior">‹</button>
-    <button class="circ" data-a="day" data-n="1" aria-label="Próximo dia" ${isT?'disabled':''}>›</button></div>`;
+    <button class="circ" data-a="day" data-n="1" aria-label="Próximo dia" ${atMax?'disabled':''}>›</button></div>`;
 }
 function ring(p,color,size=92){
   const r=36, c=2*Math.PI*r;
@@ -673,6 +682,7 @@ function macroOf(it,u,d){
   if(NUT_FIX[it.k]) return NUT_FIX[it.k];
   const g=it.g&&it.g[u]; if(g==null) return [0,0,0,0];
   const sub=it.grp?subOf(it.k,u,d):null;
+  if(sub===WHEY_NAME){ const o=findOpt(it,g,sub); if(o){ const W=wheyCfg(); return [o.g*4, o.g*W.prot/W.dose, o.g*0.1, o.g*0.05]; } }
   if(sub && GP[it.grp] && findOpt(it,g,sub)){ const [kc,fp,fc,fg]=GP[it.grp]; const k=kc*g/it.refG; return [k,k*fp/4,k*fc/4,k*fg/9]; }
   return (NUT[it.k]||[0,0,0,0]).map(v=>v*g/100);
 }
@@ -704,39 +714,41 @@ function miniRing(p,inner,size=56,color='var(--acc)'){
 function vHoje(){
   const u=S.cur, d=S.date, L=getDay(d,u), a=adherence(d,u), wg=waterGoal(u), wp=Math.min(100,Math.round((L.water||0)/wg*100)), isT=d===todayStr();
   const plan=sumMac(Object.values(ITEMS),u,d,false), eat=sumMac(Object.values(ITEMS),u,d,true), kg=lastWeight(u);
-  let h = LT(isT?'Hoje':fmtDate(d,{weekday:'long'}).split('-')[0], fmtDate(d,{day:'2-digit', month:'long'}), dateNav());
+  const isF=d>todayStr();
+  let h = LT(dayLabel(d)||fmtDate(d,{weekday:'long'}).split('-')[0], (dayLabel(d)?fmtDate(d,{weekday:'long'})+' · ':'')+fmtDate(d,{day:'2-digit', month:'long'}), dateNav());
+  if(isF) h += `<div class="banner" style="align-items:center"><div style="font-size:22px">📦</div><div><b>Planejamento${d===addDays(todayStr(),1)?' da marmita de amanhã':''}.</b> Veja o cardápio e faça trocas para este dia. Marque como comido só no dia.<br><button class="btn ghost sm" style="padding:4px 0 0" data-a="cozDia">👩‍🍳 Ver quanto preparar para os dois ›</button></div></div>`;
   const dataExists = Object.keys(S.log).length>2 || S.weights.E.length+S.weights.T.length>0 || Object.keys(S.train).length>1;
   if(dataExists && (!S.lastBackup || (Date.now()-S.lastBackup) > 7*864e5)) h += `<button class="banner warn" style="width:100%;text-align:left" data-a="export"><div>💾</div><div><b>Backup semanal pendente.</b> Toque para exportar.</div></button>`;
   // painel do dia
   h += `<div class="card"><div class="dash">${ring(a.p,'var(--acc)',84)}
-      <div style="min-width:0"><div class="muted xs b">CALORIAS</div><div class="kcal">${num(Math.round(eat[0]),0)}<small> / ${num(Math.round(plan[0]),0)} kcal</small></div>
-      <div class="muted xs">${a.c} de ${a.t} itens do plano</div></div>
+      <div style="min-width:0"><div class="muted xs b">${isF?'CALORIAS PLANEJADAS':'CALORIAS'}</div><div class="kcal">${isF?num(Math.round(plan[0]),0)+'<small> kcal</small>':num(Math.round(eat[0]),0)+'<small> / '+num(Math.round(plan[0]),0)+' kcal</small>'}</div>
+      <div class="muted xs">${isF?a.t+' itens no plano':a.c+' de '+a.t+' itens do plano'}</div></div>
       <button class="circ" data-a="totals" aria-label="Totais do dia" style="align-self:flex-start">›</button></div>
-    <div class="macros">${MAC.map(([l,i,c])=>`<div class="mac"><div class="l">${l}</div><div class="v">${num(Math.round(eat[i]),0)}<small>/${num(Math.round(plan[i]),0)} g</small></div><div class="bar"><i style="width:${plan[i]?Math.min(100,eat[i]/plan[i]*100):0}%;background:${c}"></i></div></div>`).join('')}</div>
-    <div class="waterrow"><div class="thumb" style="width:38px;height:38px;font-size:20px">💧</div><div style="flex:1;min-width:0"><div class="between"><span class="b small">Água</span><span class="muted xs">${num((L.water||0)/1000,2)} / ${num(wg/1000,2)} L</span></div><div class="bar" style="margin-top:6px"><i style="width:${wp}%"></i></div></div>
-      <button class="circ" data-a="water" data-n="-250" aria-label="Menos água">−</button><button class="circ" data-a="water" data-n="250" aria-label="Mais 250 ml" style="background:var(--water);color:#002">+</button></div></div>`;
+    <div class="macros">${MAC.map(([l,i,c])=>`<div class="mac"><div class="l">${l}</div><div class="v">${isF?num(Math.round(plan[i]),0)+'<small> g</small>':num(Math.round(eat[i]),0)+'<small>/'+num(Math.round(plan[i]),0)+' g</small>'}</div><div class="bar"><i style="width:${plan[i]?Math.min(100,eat[i]/plan[i]*100):0}%;background:${c}"></i></div></div>`).join('')}</div>
+    ${isF?'':`<div class="waterrow"><div class="thumb" style="width:38px;height:38px;font-size:20px">💧</div><div style="flex:1;min-width:0"><div class="between"><span class="b small">Água</span><span class="muted xs">${num((L.water||0)/1000,2)} / ${num(wg/1000,2)} L</span></div><div class="bar" style="margin-top:6px"><i style="width:${wp}%"></i></div></div>
+      <button class="circ" data-a="water" data-n="-250" aria-label="Menos água">−</button><button class="circ" data-a="water" data-n="250" aria-label="Mais 250 ml" style="background:var(--water);color:#002">+</button></div>`}</div>`;
   if(isT){ const s=getSess(d,u); const w=s?s.w:suggestW(u); const F=FICHAS[u].w[w];
     h += `<button class="card trainlink" data-a="tab" data-t="treino"><div class="thumb" style="background:var(--acc-soft)">${s&&s.done?'✅':'🏋️'}</div>
       <div style="flex:1;min-width:0;text-align:left"><div class="muted xs b">${s&&s.done?'TREINO CONCLUÍDO':'TREINO DE HOJE · '+w}</div><div class="b">${esc(F.n)}</div></div><span class="muted" style="font-size:22px">›</span></button>`; }
   // seletor de refeições
-  const msel = (mealSel && MEALS.find(m=>m.id===mealSel)) ? mealSel : (isT?autoMeal():'cafe');
+  const msel = (mealSel && MEALS.find(m=>m.id===mealSel)) ? mealSel : (isT?autoMeal():isF?'almoco':'cafe');
   h += `<div class="mealtabs">${MEALS.map(ml=>{ const its=mealItems(ml).filter(it=>has(it,u)); const dn=its.filter(it=>L.checks[it.k]).length;
     return `<button class="mt ${ml.id===msel?'on':''}" data-a="meal" data-m="${ml.id}">${miniRing(its.length?dn/its.length:0, dn===its.length&&its.length?'✓':MEAL_IC[ml.id], 52, dn===its.length?'var(--green)':'var(--acc)')}<b>${ml.n.replace(' da manhã','').replace(' da tarde','')}</b><span>${ml.t[u]}</span></button>`; }).join('')}</div>`;
   const ml=MEALS.find(m=>m.id===msel); const its=mealItems(ml).filter(it=>has(it,u)); const done=its.filter(it=>L.checks[it.k]).length; const mm=sumMac(its,u,d,false);
   h += `<div class="card meal"><div class="mhero"><div class="em">${MEAL_IC[ml.id]}</div><div style="flex:1;min-width:0"><div class="h3">${ml.n}</div>
       <div class="muted xs">${ml.t[u]} · ≈ ${num(Math.round(mm[0]),0)} kcal · ${num(Math.round(mm[1]),0)} g proteína</div></div>
-      <button class="pill ${done===its.length?'green':'acc'}" data-a="mealAll" data-m="${ml.id}">${done===its.length?'✓ feita':'marcar tudo'}</button></div>`;
+      ${isF?'<span class="pill">planejado</span>':`<button class="pill ${done===its.length?'green':'acc'}" data-a="mealAll" data-m="${ml.id}">${done===its.length?'✓ feita':'marcar tudo'}</button>`}</div>`;
   for(const s of ml.secs){ const si=s.it.filter(it=>has(it,u)); if(!si.length) continue;
     if(s.n) h += `<div class="sec-t">${s.n}</div>`;
     for(const it of si){ const e=eff(it,u,d), on=!!L.checks[it.k];
       const q=[e.g!=null?fmtG(e.g,e.n,e.liquid):'', e.m||''].filter(Boolean).join(' · ');
       h += `<div class="item ${on?'done':''}"><button class="thumb ${it.grp?'sw':''}" ${it.grp?`data-a="openSub" data-k="${it.k}"`:(it.recipe?'data-a="recipe"':'')} aria-label="${it.grp?'Trocar':'Item'}">${foodIc(e.n)}</button>
         <div class="it-main" ${it.grp?`data-a="openSub" data-k="${it.k}"`:''}><div class="it-n">${esc(e.n)}${e.s?' <span style="color:var(--warn)">⚠</span>':''}</div>
-          <div class="it-q">${esc(q)}${e.sub?` · <span style="color:var(--green)">↻ troca</span>`:''}${it.recipe&&!e.sub?' · <span style="color:var(--acc)" data-a="recipe">receita</span>':''}</div></div>
-        <button class="chk ${on?'on':''}" data-a="chk" data-k="${it.k}" aria-label="Marcar">${CHECK}</button></div>`; } }
+          <div class="it-q">${esc(q)}${e.whey?' · ≈ '+num(e.g/wheyCfg().dose,1)+' dose(s)':''}${e.sub?` · <span style="color:var(--green)">↻ troca</span>`:''}${it.recipe&&!e.sub?' · <span style="color:var(--acc)" data-a="recipe">receita</span>':''}</div></div>
+        ${isF?'':`<button class="chk ${on?'on':''}" data-a="chk" data-k="${it.k}" aria-label="Marcar">${CHECK}</button>`}</div>`; } }
   if(ml.note && ml.note[u]) h += `<details class="note"><summary>📝 Orientação da nutricionista</summary><div style="margin-top:6px">${esc(ml.note[u])}</div></details>`;
   h += `<div class="muted xs" style="margin-top:10px;text-align:center">Toque no alimento para ver as trocas</div></div>`;
-  h += `<details class="card daynote"><summary class="between"><span class="b">📝 Anotações do dia</span><span class="muted xs">${L.note?'1 nota':'adicionar'}</span></summary><textarea id="dayNote" style="margin-top:10px" placeholder="Ex.: fome à tarde, comi fora, dormi mal...">${esc(L.note||'')}</textarea></details>`;
+  if(!isF) h += `<details class="card daynote"><summary class="between"><span class="b">📝 Anotações do dia</span><span class="muted xs">${L.note?'1 nota':'adicionar'}</span></summary><textarea id="dayNote" style="margin-top:10px" placeholder="Ex.: fome à tarde, comi fora, dormi mal...">${esc(L.note||'')}</textarea></details>`;
   return h;
 }
 function totalsSheet(){
@@ -863,7 +875,7 @@ function vSemana(){
 }
 function vDois(){
   const d=S.date, isT=d===todayStr();
-  let h = `<div class="card minidate"><div><div class="muted xs">${isT?'Hoje':'Dia'}</div><b>${fmtDate(d,{weekday:'long',day:'2-digit',month:'short'})}</b></div>${dateNav()}</div>`;
+  let h = `<div class="card minidate"><div><div class="muted xs">${dayLabel(d)||'Dia'}</div><b>${fmtDate(d,{weekday:'long',day:'2-digit',month:'short'})}</b></div>${dateNav()}</div>`;
   for(const ml of MEALS){
     h += `<div class="card"><div class="between" style="margin-bottom:4px"><h3 class="h3">${ml.n}</h3><span class="muted xs">${ml.t.E===ml.t.T?ml.t.E:'E '+ml.t.E+' · T '+ml.t.T}</span></div>`;
     for(const it of ml.secs.flatMap(s=>s.it)){
@@ -1006,6 +1018,10 @@ function vMais(){
         <div><label class="f">Treinos/semana</label><input type="number" inputmode="numeric" data-set="trains" data-u="${u}" value="${P.trains||FICHAS[u].meta}"></div>
         <div style="grid-column:1/-1"><label class="f">Cardio (min/semana)</label><input type="number" inputmode="numeric" step="10" data-set="cardio" data-u="${u}" value="${P.cardio||150}"></div>
       </div><p class="muted xs" style="margin:8px 0 0">Defina peso-alvo e água com a nutricionista. Sem meta de água, o app sugere 35 ml por kg.</p></div>`; }
+  { const W=wheyCfg(); h += `<div class="card"><div class="between" style="margin-bottom:4px"><div class="h3">🥤 Whey</div><span class="muted xs">para o cálculo de trocas</span></div>
+    <p class="muted xs" style="margin:0 0 12px">Confira no rótulo do seu whey: tamanho da dose e proteína por dose.</p>
+    <div class="grid2"><div><label class="f">Dose (g)</label><input type="text" inputmode="decimal" data-whey="dose" value="${W.dose}"></div>
+    <div><label class="f">Proteína por dose (g)</label><input type="text" inputmode="decimal" data-whey="prot" value="${W.prot}"></div></div></div>`; }
   h += `<div class="card"><div class="h3" style="margin-bottom:6px">Backup dos dados</div>
     <p class="muted small" style="margin:0 0 12px">Os registros ficam <b>só neste navegador</b>. Exporte com frequência e guarde o arquivo (Drive, WhatsApp, e-mail). Para levar a outro celular, importe lá.
     ${S.lastBackup?`<br>Último backup: ${new Date(S.lastBackup).toLocaleDateString('pt-BR')}.`:'<br><b>Nenhum backup feito ainda.</b>'}</p>
@@ -1033,7 +1049,7 @@ function openSub(k,dw){
   const it=ITEMS[k]; const week=dw!=null&&dw!=='';
   subCtx={k, week, dw:week?Number(dw):null, both:has(it,OTHER[S.cur]), q:''}; const u=S.cur; const g=week?null:it.g[u];
   const head=`<div class="between"><div><h2>${esc(it.n)}</h2><div class="muted small">${week?'Troca para '+DOW[subCtx.dw].toLowerCase()+' · vale para os dois':'Plano: '+fmtG(g,it.n,it.liquid)+(it.m&&it.m[u]?' · '+esc(it.m[u]):'')}</div></div>${closeBtn}</div>
-    ${!week&&subCtx.both?`<label class="toggle" style="margin:12px 0 0"><input type="checkbox" id="subBoth" checked> Aplicar também para ${USERS[OTHER[u]].name} neste dia</label>`:''}
+    ${!week&&subCtx.both?`<label class="toggle" style="margin:12px 0 0"><input type="checkbox" id="subBoth"> Aplicar também para ${USERS[OTHER[u]].name} neste dia</label>`:''}
     ${it.grp==='hortA'||it.grp==='hortAB'?'':`<input type="search" id="subQ" placeholder="Buscar alimento..." style="margin-top:10px">`}`;
   openSheet({head, body:subList()});
 }
@@ -1177,18 +1193,19 @@ const A = {
   accent(el){ S.users[el.dataset.u].accent=el.dataset.c; save(); keepScroll(render); },
   user(el){ exOpen=null; S.cur=el.dataset.u; save(); render(); window.scrollTo(0,0); },
   tab(el){ S.tab=el.dataset.t; save(); render(); window.scrollTo(0,0); },
-  day(el){ mealSel=null; S.date=addDays(S.date,Number(el.dataset.n)); if(S.date>todayStr()) S.date=todayStr(); render(); },
+  day(el){ mealSel=null; S.date=addDays(S.date,Number(el.dataset.n)); if(S.date>addDays(todayStr(),MAXF)) S.date=addDays(todayStr(),MAXF); render(); },
   today(){ S.date=todayStr(); render(); },
   goDay(el){ S.date=el.dataset.d; S.tab='hoje'; save(); render(); window.scrollTo(0,0); },
-  chk(el){ const L=dayW(S.date,S.cur); const k=el.dataset.k; if(L.checks[k]) delete L.checks[k]; else L.checks[k]=true; save(); keepScroll(render); },
-  mealAll(el){ const ml=MEALS.find(m=>m.id===el.dataset.m); const L=dayW(S.date,S.cur); const its=ml.secs.flatMap(s=>s.it).filter(it=>has(it,S.cur));
+  chk(el){ if(S.date>todayStr()){ toast('Dia futuro: marque quando comer'); return; } const L=dayW(S.date,S.cur); const k=el.dataset.k; if(L.checks[k]) delete L.checks[k]; else L.checks[k]=true; save(); keepScroll(render); },
+  mealAll(el){ if(S.date>todayStr()) return; const ml=MEALS.find(m=>m.id===el.dataset.m); const L=dayW(S.date,S.cur); const its=ml.secs.flatMap(s=>s.it).filter(it=>has(it,S.cur));
     const all=its.every(it=>L.checks[it.k]); its.forEach(it=>{ if(all) delete L.checks[it.k]; else L.checks[it.k]=true; }); save(); keepScroll(render); },
-  water(el){ const L=dayW(S.date,S.cur); L.water=Math.max(0,(L.water||0)+Number(el.dataset.n)); save(); keepScroll(render); },
+  water(el){ if(S.date>todayStr()) return; const L=dayW(S.date,S.cur); L.water=Math.max(0,(L.water||0)+Number(el.dataset.n)); save(); keepScroll(render); },
   openSub(el){ openSub(el.dataset.k, el.dataset.w); },
   pickSub(el){ pickSub(el.dataset.n); },
   closeSheet(){ closeSheet(); },
   recipe(){ recipeSheet(); },
   totals(){ totalsSheet(); },
+  cozDia(){ S.tab='cozinha'; cozView='dois'; save(); render(); window.scrollTo(0,0); },
   meal(el){ mealSel=el.dataset.m; keepScroll(render); },
   exOpen(el){ const i=Number(el.dataset.i); const cur=document.querySelector('.exwrap.open'); const openNow=cur?[...document.querySelectorAll('.exwrap')].indexOf(cur):-1; exOpen = openNow===i ? -1 : i; keepScroll(render); },
   shopping(){ S.tab='cozinha'; cozView='compras'; render(); window.scrollTo(0,0); },
@@ -1269,6 +1286,7 @@ document.addEventListener('input', e=>{
 });
 document.addEventListener('change', e=>{
   const t=e.target;
+  if(t.dataset&&t.dataset.whey){ const v=pnum(t.value); S.whey=S.whey||{}; if(v>0){ S.whey[t.dataset.whey]=v; save(); toast('Salvo'); } }
   if(t.dataset&&t.dataset.set){ const u=t.dataset.u,k=t.dataset.set; const v=pnum(t.value); S.users[u][k]=(v>0)?(k==='goal'?Math.round(v*10)/10:Math.round(v)):null; save(); toast('Salvo'); }
   if(t.id==='impFile'&&t.files[0]){ const r=new FileReader(); r.onload=()=>{ try{ const j=JSON.parse(r.result); const d=j.data||j; if(!d.log||!d.weights) throw 0;
       if(!confirm('Substituir os dados deste aparelho pelos do backup?')) return; localStorage.setItem(KEY, JSON.stringify(d)); location.reload(); }catch(err){ toast('Arquivo de backup inválido'); } }; r.readAsText(t.files[0]); t.value=''; }
